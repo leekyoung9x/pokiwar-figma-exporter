@@ -1,0 +1,504 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <title>Pokiwar Canvas Exporter</title>
+  <style>
+    :root {
+      --bg: #1e1e1e;
+      --card-bg: #252526;
+      --text: #ffffff;
+      --text-muted: #8e8e93;
+      --primary: #0a84ff;
+      --primary-hover: #0070e0;
+      --success: #30d158;
+      --border: #38383a;
+      --radius: 8px;
+    }
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      padding: 16px;
+      font-size: 13px;
+      line-height: 1.4;
+    }
+    .header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 16px;
+      padding-bottom: 12px;
+      border-bottom: 1px solid var(--border);
+    }
+    .header h2 {
+      font-size: 16px;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .badge {
+      font-size: 10px;
+      padding: 2px 6px;
+      border-radius: 4px;
+      background: rgba(10, 132, 255, 0.2);
+      color: var(--primary);
+      font-weight: 600;
+    }
+    .section {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 14px;
+      margin-bottom: 14px;
+    }
+    .section-title {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 10px;
+    }
+    .radio-group {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .radio-label {
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+      cursor: pointer;
+    }
+    .radio-label input {
+      margin-top: 2px;
+      cursor: pointer;
+    }
+    .radio-desc {
+      font-size: 11px;
+      color: var(--text-muted);
+      margin-top: 2px;
+    }
+    .checkbox-label {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 10px;
+      cursor: pointer;
+      font-size: 12px;
+    }
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      width: 100%;
+      padding: 10px 14px;
+      border-radius: var(--radius);
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      border: none;
+      transition: background 0.15s ease, opacity 0.15s ease;
+    }
+    .btn-primary {
+      background: var(--primary);
+      color: #fff;
+    }
+    .btn-primary:hover {
+      background: var(--primary-hover);
+    }
+    .btn-primary:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+    .btn-secondary {
+      background: #3a3a3c;
+      color: #fff;
+      margin-top: 8px;
+    }
+    .btn-secondary:hover {
+      background: #48484a;
+    }
+    .btn-success {
+      background: var(--success);
+      color: #000;
+      font-weight: 700;
+    }
+    .btn-success:hover {
+      background: #28b84b;
+    }
+    .progress-box {
+      display: none;
+      margin-top: 12px;
+    }
+    .progress-bar-container {
+      width: 100%;
+      height: 6px;
+      background: #38383a;
+      border-radius: 3px;
+      overflow: hidden;
+      margin-bottom: 6px;
+    }
+    .progress-bar {
+      width: 0%;
+      height: 100%;
+      background: var(--primary);
+      transition: width 0.1s ease;
+    }
+    .progress-status {
+      font-size: 11px;
+      color: var(--text-muted);
+      text-align: center;
+    }
+    .results-card {
+      display: none;
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 14px;
+      margin-top: 14px;
+    }
+    .results-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+    .stat-item {
+      background: rgba(255, 255, 255, 0.04);
+      padding: 8px 10px;
+      border-radius: 6px;
+    }
+    .stat-label {
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+    .stat-value {
+      font-size: 15px;
+      font-weight: 700;
+      color: #fff;
+      margin-top: 2px;
+    }
+    .stat-diff {
+      font-size: 10px;
+      color: var(--success);
+      font-weight: 600;
+    }
+    .download-actions {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      margin-top: 12px;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="header">
+    <h2>⚡ Pokiwar Exporter</h2>
+    <span class="badge">v1.0.0</span>
+  </div>
+
+  <div class="section">
+    <div class="section-title">Phạm vi xuất (Scope)</div>
+    <div class="radio-group">
+      <label class="radio-label">
+        <input type="radio" name="scope" value="selection" checked id="scopeSelection">
+        <div>
+          <div>Selection hiện tại</div>
+          <div class="radio-desc" id="selectionInfo">Đang kiểm tra selection...</div>
+        </div>
+      </label>
+      <label class="radio-label">
+        <input type="radio" name="scope" value="page" id="scopePage">
+        <div>
+          <div>Toàn bộ Page</div>
+          <div class="radio-desc" id="pageInfo">Toàn bộ layer trong trang</div>
+        </div>
+      </label>
+    </div>
+
+    <label class="checkbox-label">
+      <input type="checkbox" id="chkImages" checked>
+      <span>Xuất kèm file ảnh PNG (visual leaves)</span>
+    </label>
+  </div>
+
+  <button class="btn btn-primary" id="btnExport">⚡ Export cho Pokiwar Web</button>
+
+  <div class="progress-box" id="progressBox">
+    <div class="progress-bar-container">
+      <div class="progress-bar" id="progressBar"></div>
+    </div>
+    <div class="progress-status" id="progressStatus">Đang xử lý...</div>
+  </div>
+
+  <div class="results-card" id="resultsCard">
+    <div class="section-title">Kết quả Export</div>
+    <div class="results-grid">
+      <div class="stat-item">
+        <div class="stat-label">Số Node</div>
+        <div class="stat-value" id="statNodes">0</div>
+      </div>
+      <div class="stat-item">
+        <div class="stat-label">Số Ảnh Export</div>
+        <div class="stat-value" id="statImages">0</div>
+      </div>
+      <div class="stat-item">
+        <div class="stat-label">Dung lượng JSON</div>
+        <div class="stat-value" id="statBytes">0 KB</div>
+        <div class="stat-diff" id="statBytesDiff">-78% so với bản cũ</div>
+      </div>
+      <div class="stat-item">
+        <div class="stat-label">Thời gian chạy</div>
+        <div class="stat-value" id="statTime">0 ms</div>
+      </div>
+    </div>
+
+    <div class="download-actions">
+      <button class="btn btn-success" id="btnDownloadZip">📦 Tải trọn bộ .ZIP (nodes + images)</button>
+      <div style="display: flex; gap: 8px;">
+        <button class="btn btn-secondary" id="btnDownloadNodes">📄 nodes.json</button>
+        <button class="btn btn-secondary" id="btnDownloadImagesJson">🖼️ images.json</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let exportData = null;
+
+    // Lắng nghe message từ plugin backend (code.js)
+    window.onmessage = async (event) => {
+      const msg = event.data.pluginMessage;
+      if (!msg) return;
+
+      if (msg.type === 'init' || msg.type === 'selection-change') {
+        updateSelectionUI(msg.data);
+      } else if (msg.type === 'status') {
+        showProgress(msg.message, 50);
+      } else if (msg.type === 'progress') {
+        const pct = Math.round((msg.current / msg.total) * 100);
+        showProgress(msg.message, pct);
+      } else if (msg.type === 'export-complete') {
+        handleExportComplete(msg);
+      } else if (msg.type === 'error') {
+        alert(msg.message);
+        hideProgress();
+      }
+    };
+
+    function updateSelectionUI(info) {
+      const selInfoEl = document.getElementById('selectionInfo');
+      const pageInfoEl = document.getElementById('pageInfo');
+      pageInfoEl.innerText = `Trang: ${info.pageName}`;
+
+      if (info.hasSelection) {
+        selInfoEl.innerText = `${info.selectionCount} đối tượng (${info.selectionNames})`;
+        document.getElementById('scopeSelection').checked = true;
+      } else {
+        selInfoEl.innerText = `Chưa chọn layer nào (sẽ dùng toàn bộ page)`;
+        document.getElementById('scopePage').checked = true;
+      }
+    }
+
+    const btnExport = document.getElementById('btnExport');
+    btnExport.onclick = () => {
+      const scope = document.querySelector('input[name="scope"]:checked').value;
+      const exportImages = document.getElementById('chkImages').checked;
+
+      btnExport.disabled = true;
+      document.getElementById('resultsCard').style.display = 'none';
+      showProgress('Bắt đầu duyệt scene graph...', 10);
+
+      parent.postMessage({
+        pluginMessage: {
+          type: 'export',
+          scope,
+          exportImages,
+        }
+      }, '*');
+    };
+
+    function showProgress(text, pct) {
+      const pbox = document.getElementById('progressBox');
+      const pbar = document.getElementById('progressBar');
+      const pstat = document.getElementById('progressStatus');
+      pbox.style.display = 'block';
+      pbar.style.width = pct + '%';
+      pstat.innerText = text;
+    }
+
+    function hideProgress() {
+      document.getElementById('progressBox').style.display = 'none';
+      btnExport.disabled = false;
+    }
+
+    function handleExportComplete(data) {
+      hideProgress();
+      exportData = data;
+
+      document.getElementById('resultsCard').style.display = 'block';
+      document.getElementById('statNodes').innerText = data.stats.nodeCount;
+      document.getElementById('statImages').innerText = data.stats.imageCount;
+
+      const kb = (data.stats.nodesBytes / 1024).toFixed(1);
+      document.getElementById('statBytes').innerText = `${kb} KB`;
+      document.getElementById('statTime').innerText = `${(data.stats.elapsedMs / 1000).toFixed(2)} s`;
+
+      if (data.stats.nodesBytes < 600734) {
+        const pct = (((600734 - data.stats.nodesBytes) / 600734) * 100).toFixed(1);
+        document.getElementById('statBytesDiff').innerText = `Giảm ${pct}% so với bản cũ (600 KB)`;
+      } else {
+        document.getElementById('statBytesDiff').innerText = '';
+      }
+    }
+
+    function triggerDownload(filename, content, type = 'application/json') {
+      const blob = content instanceof Blob ? content : new Blob([content], { type });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }
+
+    document.getElementById('btnDownloadNodes').onclick = () => {
+      if (!exportData) return;
+      triggerDownload('nodes.json', exportData.nodesJson);
+    };
+
+    document.getElementById('btnDownloadImagesJson').onclick = () => {
+      if (!exportData) return;
+      triggerDownload('images.json', exportData.imagesJson);
+    };
+
+    document.getElementById('btnDownloadZip').onclick = async () => {
+      if (!exportData) return;
+      showProgress('Đang nén file .ZIP...', 50);
+
+      try {
+        const zipBlob = await createZipArchive([
+          { name: 'nodes.json', data: new TextEncoder().encode(exportData.nodesJson) },
+          { name: 'images.json', data: new TextEncoder().encode(exportData.imagesJson) },
+          ...(exportData.imagesData || []).map(img => ({
+            name: `images/${img.name}`,
+            data: img.bytes
+          }))
+        ]);
+
+        triggerDownload('pokiwar-canvas-export.zip', zipBlob, 'application/zip');
+      } catch (err) {
+        alert('Lỗi khi nén zip: ' + err.message);
+      } finally {
+        hideProgress();
+      }
+    };
+
+    // ── Pure JS PKZip Generator (STORE mode - universal compatibility) ────────
+    function createZipArchive(files) {
+      // Bảng CRC32
+      const crcTable = new Uint32Array(256);
+      for (let i = 0; i < 256; i++) {
+        let c = i;
+        for (let j = 0; j < 8; j++) {
+          c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+        }
+        crcTable[i] = c;
+      }
+      function calcCRC32(bytes) {
+        let crc = 0xFFFFFFFF;
+        for (let i = 0; i < bytes.length; i++) {
+          crc = (crc >>> 8) ^ crcTable[(crc ^ bytes[i]) & 0xFF];
+        }
+        return (crc ^ 0xFFFFFFFF) >>> 0;
+      }
+
+      const encoder = new TextEncoder();
+      const localHeaders = [];
+      const centralHeaders = [];
+      let offset = 0;
+
+      for (const file of files) {
+        const nameBytes = encoder.encode(file.name);
+        const dataBytes = file.data instanceof Uint8Array ? file.data : new Uint8Array(file.data);
+        const crc = calcCRC32(dataBytes);
+        const size = dataBytes.length;
+
+        // Local Header (30 bytes + name + data)
+        const lh = new Uint8Array(30 + nameBytes.length);
+        const lView = new DataView(lh.buffer);
+        lView.setUint32(0, 0x04034B50, true); // Signature
+        lView.setUint16(4, 20, true);         // Version needed
+        lView.setUint16(6, 0, true);          // General flag
+        lView.setUint16(8, 0, true);          // Compression: STORE (0)
+        lView.setUint16(10, 0, true);         // Mod time
+        lView.setUint16(12, 0, true);         // Mod date
+        lView.setUint32(14, crc, true);       // CRC32
+        lView.setUint32(18, size, true);      // Compressed size
+        lView.setUint32(22, size, true);      // Uncompressed size
+        lView.setUint16(26, nameBytes.length, true); // Filename length
+        lView.setUint16(28, 0, true);         // Extra field length
+        lh.set(nameBytes, 30);
+
+        localHeaders.push(lh);
+        localHeaders.push(dataBytes);
+
+        // Central Directory Header (46 bytes + name)
+        const cd = new Uint8Array(46 + nameBytes.length);
+        const cView = new DataView(cd.buffer);
+        cView.setUint32(0, 0x02014B50, true); // Signature
+        cView.setUint16(4, 20, true);         // Version made by
+        cView.setUint16(6, 20, true);         // Version needed
+        cView.setUint16(8, 0, true);          // General flag
+        cView.setUint16(10, 0, true);         // Compression: STORE (0)
+        cView.setUint16(12, 0, true);         // Mod time
+        cView.setUint16(14, 0, true);         // Mod date
+        cView.setUint32(16, crc, true);       // CRC32
+        cView.setUint32(20, size, true);      // Compressed size
+        cView.setUint32(24, size, true);      // Uncompressed size
+        cView.setUint16(28, nameBytes.length, true); // Filename length
+        cView.setUint16(30, 0, true);         // Extra field length
+        cView.setUint16(32, 0, true);         // File comment length
+        cView.setUint16(34, 0, true);         // Disk start
+        cView.setUint16(36, 0, true);         // Internal attributes
+        cView.setUint32(38, 0, true);         // External attributes
+        cView.setUint32(42, offset, true);    // Offset of local header
+        cd.set(nameBytes, 46);
+
+        centralHeaders.push(cd);
+        offset += lh.length + dataBytes.length;
+      }
+
+      const cdOffset = offset;
+      let cdSize = 0;
+      for (const cd of centralHeaders) cdSize += cd.length;
+
+      // End of Central Directory (22 bytes)
+      const eocd = new Uint8Array(22);
+      const eView = new DataView(eocd.buffer);
+      eView.setUint32(0, 0x06054B50, true); // Signature
+      eView.setUint16(4, 0, true);          // Disk number
+      eView.setUint16(6, 0, true);          // Start disk
+      eView.setUint16(8, files.length, true);  // Records on this disk
+      eView.setUint16(10, files.length, true); // Total records
+      eView.setUint32(12, cdSize, true);       // Size of central dir
+      eView.setUint32(16, cdOffset, true);     // Offset of central dir
+      eView.setUint16(20, 0, true);            // Comment length
+
+      const allParts = [...localHeaders, ...centralHeaders, eocd];
+      return new Blob(allParts, { type: 'application/zip' });
+    }
+  </script>
+</body>
+</html>
