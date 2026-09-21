@@ -240,4 +240,68 @@ describe('Pokiwar Canvas Exporter Test Suite', () => {
     // poc cũ — chỉ kiểm nếu có imageRef (bỏ qua legacy format)
   });
 
+  // ── CA 7: Giả lập treo exportAsync (never-resolve) phải timeout, không kẹt ───────
+  test('Ca 7: exportAsync treo (never-resolve) phai timeout trong 100ms va bo qua', async () => {
+    function exportWithTimeout(node, timeoutMs = 100) {
+      return Promise.race([
+        node.exportAsync({ format: 'PNG', constraint: { type: 'SCALE', value: 1 } }),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('timeout ' + timeoutMs + 'ms')), timeoutMs))
+      ]);
+    }
+    const hangingNode = {
+      id: 'hang:1',
+      name: 'Hanging_Node',
+      exportAsync: () => new Promise(() => {}),
+    };
+    const okNode = {
+      id: 'ok:1',
+      name: 'Ok_Node',
+      exportAsync: async () => {
+        const b = new Uint8Array(24);
+        b[16]=0; b[17]=0; b[18]=0; b[19]=2;
+        b[20]=0; b[21]=0; b[22]=0; b[23]=2;
+        return b;
+      }
+    };
+    const t0 = Date.now();
+    let threw = false;
+    try {
+      await exportWithTimeout(hangingNode, 100);
+    } catch (e) {
+      threw = true;
+      assert.match(e.message, /timeout/);
+    }
+    const elapsed = Date.now() - t0;
+    assert.equal(threw, true);
+    assert.ok(elapsed >= 80 && elapsed < 500, 'Timeout phai ~100ms, thuc te ' + elapsed + 'ms');
+    const bytes = await exportWithTimeout(okNode, 100);
+    assert.ok(bytes && bytes.length >= 24);
+    const total = 5;
+    const nodes = Array.from({length: total}, (_,i) => i === total-1 ? hangingNode : okNode);
+    const failedIds = new Set();
+    let completed = 0;
+    for (let i=0;i<total;i++) {
+      try {
+        await exportWithTimeout(nodes[i], 80);
+        completed++;
+      } catch {
+        failedIds.add(i);
+      }
+    }
+    assert.equal(completed, total-1);
+    assert.equal(failedIds.size, 1);
+    assert.ok(failedIds.has(total-1));
+  });
+
+  test('Ca 7b: code.js phai chua exportWithTimeout va timeout 10000', () => {
+    const code = fs.readFileSync('/Downloads/poki/figma-plugin-pokiwar/code.js','utf8');
+    assert.match(code, /exportWithTimeout/);
+    assert.match(code, /Promise\.race/);
+    assert.match(code, /10000/);
+    assert.match(code, /figma\.notify/);
+    assert.match(code, /export-complete/);
+    assert.ok(code.includes("type: 'error'"));
+  });
+
+
 });

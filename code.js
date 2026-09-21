@@ -8,6 +8,7 @@
  * - Xuất thông tin text, fills, strokes, clipsContent.
  * - Chỉ xuất ảnh PNG cho visual leaf thật sự / node có image fill; KHÔNG xuất cho khung cha/node rỗng.
  * - Xuất kèm images.json (manifest ánh xạ imageRef -> tên file).
+ * - FIX treo 147/147: timeout exportAsync, try/catch/finally toàn cục, luôn gửi export-complete/error.
  */
 
 figma.showUI(__html__, {
@@ -151,138 +152,130 @@ figma.ui.onmessage = async (msg) => {
     const scope = msg.scope || 'selection';
     const exportImages = msg.exportImages !== false;
 
-    // Xác định tập node gốc
     let rootNodes = [];
-    if (scope === 'selection' && figma.currentPage.selection.length > 0) {
-      rootNodes = Array.from(figma.currentPage.selection);
-    } else {
-      rootNodes = Array.from(figma.currentPage.children);
-    }
+    let exportedNodes = [];
+    let leafNodesForImages = [];
+    let rootBounds = null;
+    let refX = 0;
+    let refY = 0;
 
-    if (rootNodes.length === 0) {
-      figma.ui.postMessage({
-        type: 'error',
-        message: 'Không tìm thấy node nào để export. Hãy chọn ít nhất 1 frame hoặc chọn "Toàn bộ Page".',
-      });
-      return;
-    }
+    try {
+      if (scope === 'selection' && figma.currentPage.selection.length > 0) {
+        rootNodes = Array.from(figma.currentPage.selection);
+      } else {
+        rootNodes = Array.from(figma.currentPage.children);
+      }
 
-    figma.ui.postMessage({ type: 'status', message: 'Đang duyệt cây đối tượng...' });
+      if (rootNodes.length === 0) {
+        figma.ui.postMessage({
+          type: 'error',
+          message: 'Không tìm thấy node nào để export. Hãy chọn ít nhất 1 frame hoặc chọn "Toàn bộ Page".',
+        });
+        return;
+      }
 
-    // Lấy toạ độ gốc tham chiếu từ root node đầu tiên
-    const firstRoot = rootNodes[0];
-    const rootBounds = firstRoot.absoluteBoundingBox || { x: 0, y: 0, width: firstRoot.width || 1440, height: firstRoot.height || 720 };
-    const refX = rootBounds.x;
-    const refY = rootBounds.y;
+      figma.ui.postMessage({ type: 'status', message: 'Đang duyệt cây đối tượng...' });
 
-    const exportedNodes = [];
-    const leafNodesForImages = [];
+      const firstRoot = rootNodes[0];
+      rootBounds = firstRoot.absoluteBoundingBox || { x: 0, y: 0, width: firstRoot.width || 1440, height: firstRoot.height || 720 };
+      refX = rootBounds.x;
+      refY = rootBounds.y;
 
-    // Duyệt DFS pre-order bảo toàn z-order (con đầu vẽ trước, con cuối đè lên)
-    // ancVis = effectiveVisible của tổ tiên (true = mọi tổ tiên đều visible)
-    function traverse(node, parentId = null, ancVis = true) {
-      const box = node.absoluteBoundingBox;
-      // Toạ độ tuyệt đối tính sẵn so với gốc màn hình
-      const x = box ? Math.round((box.x - refX) * 100) / 100 : 0;
-      const y = box ? Math.round((box.y - refY) * 100) / 100 : 0;
-      const width = box ? Math.round(box.width * 100) / 100 : Math.round((node.width || 0) * 100) / 100;
-      const height = box ? Math.round(box.height * 100) / 100 : Math.round((node.height || 0) * 100) / 100;
+      exportedNodes = [];
+      leafNodesForImages = [];
 
-      const ownVisible = node.visible !== false;
-      const effVis = ancVis && ownVisible;
-      const visible = ownVisible;
-      const opacity = typeof node.opacity === 'number' ? node.opacity : 1;
-      const cornerRadii = getCornerRadii(node);
-      const fills = getFills(node);
-      const strokes = getStrokes(node);
-      const strokeWeight = typeof node.strokeWeight === 'number' ? node.strokeWeight : 0;
-      const strokeAlign = typeof node.strokeAlign === 'string' ? node.strokeAlign : 'CENTER';
-      const clipsContent = typeof node.clipsContent === 'boolean' ? node.clipsContent : false;
+      function traverse(node, parentId = null, ancVis = true) {
+        const box = node.absoluteBoundingBox;
+        const x = box ? Math.round((box.x - refX) * 100) / 100 : 0;
+        const y = box ? Math.round((box.y - refY) * 100) / 100 : 0;
+        const width = box ? Math.round(box.width * 100) / 100 : Math.round((node.width || 0) * 100) / 100;
+        const height = box ? Math.round(box.height * 100) / 100 : Math.round((node.height || 0) * 100) / 100;
 
-      // Xử lý text
-      let text = null;
-      if (node.type === 'TEXT') {
-        const chars = node.characters || '';
-        const fs = typeof node.fontSize === 'number' ? node.fontSize : 14;
-        const fontName =
-          node.fontName && node.fontName !== figma.mixed
-            ? { family: node.fontName.family, style: node.fontName.style }
-            : { family: 'sans-serif', style: 'Regular' };
-        const lh = node.lineHeight && node.lineHeight !== figma.mixed ? node.lineHeight : null;
-        const lhObj = lh ? { unit: lh.unit, value: typeof lh.value === 'number' ? lh.value : null } : null;
+        const ownVisible = node.visible !== false;
+        const effVis = ancVis && ownVisible;
+        const visible = ownVisible;
+        const opacity = typeof node.opacity === 'number' ? node.opacity : 1;
+        const cornerRadii = getCornerRadii(node);
+        const fills = getFills(node);
+        const strokes = getStrokes(node);
+        const strokeWeight = typeof node.strokeWeight === 'number' ? node.strokeWeight : 0;
+        const strokeAlign = typeof node.strokeAlign === 'string' ? node.strokeAlign : 'CENTER';
+        const clipsContent = typeof node.clipsContent === 'boolean' ? node.clipsContent : false;
 
-        text = {
-          characters: chars,
-          fontSize: fs,
-          fontName,
-          fills: fills,
-          textAlign: node.textAlignHorizontal || 'LEFT',
-          textAlignVertical: node.textAlignVertical || 'TOP',
-          lineHeight: lhObj,
-          textAutoResize: node.textAutoResize || null,
+        let text = null;
+        if (node.type === 'TEXT') {
+          const chars = node.characters || '';
+          const fs = typeof node.fontSize === 'number' ? node.fontSize : 14;
+          const fontName =
+            node.fontName && node.fontName !== figma.mixed
+              ? { family: node.fontName.family, style: node.fontName.style }
+              : { family: 'sans-serif', style: 'Regular' };
+          const lh = node.lineHeight && node.lineHeight !== figma.mixed ? node.lineHeight : null;
+          const lhObj = lh ? { unit: lh.unit, value: typeof lh.value === 'number' ? lh.value : null } : null;
+
+          text = {
+            characters: chars,
+            fontSize: fs,
+            fontName,
+            fills: fills,
+            textAlign: node.textAlignHorizontal || 'LEFT',
+            textAlignVertical: node.textAlignVertical || 'TOP',
+            lineHeight: lhObj,
+            textAutoResize: node.textAutoResize || null,
+          };
+        }
+
+        const isLeaf = isVisualLeaf(node);
+        const imgKey = isLeaf ? node.id.replace(/:/g, '_') : null;
+
+        if (isLeaf && exportImages) {
+          leafNodesForImages.push({ node, imgKey, effVis, ancVis });
+        }
+
+        const item = {
+          id: node.id,
+          name: node.name,
+          type: node.type,
+          parentID: parentId,
+          x,
+          y,
+          width,
+          height,
+          visible,
+          opacity,
+          cornerRadii,
+          fills,
+          strokes,
+          strokeWeight,
+          strokeAlign,
+          clipsContent,
+          text,
+          imageRef: imgKey,
         };
-      }
 
-      const isLeaf = isVisualLeaf(node);
-      const imgKey = isLeaf ? node.id.replace(/:/g, '_') : null;
+        exportedNodes.push(item);
 
-      if (isLeaf && exportImages) {
-        leafNodesForImages.push({ node, imgKey, effVis, ancVis });
-      }
-
-      const item = {
-        id: node.id,
-        name: node.name,
-        type: node.type,
-        parentID: parentId,
-        x,
-        y,
-        width,
-        height,
-        visible,
-        opacity,
-        cornerRadii,
-        fills,
-        strokes,
-        strokeWeight,
-        strokeAlign,
-        clipsContent,
-        text,
-        imageRef: imgKey,
-      };
-
-      exportedNodes.push(item);
-
-      // Đệ quy con theo thứ tự Figma (0 là dưới cùng, length-1 là trên cùng)
-      if ('children' in node && Array.isArray(node.children)) {
-        for (const child of node.children) {
-          traverse(child, node.id, effVis);
+        if ('children' in node && Array.isArray(node.children)) {
+          for (const child of node.children) {
+            traverse(child, node.id, effVis);
+          }
         }
       }
-    }
 
-    for (const root of rootNodes) {
-      traverse(root, null, true);
-    }
+      for (const root of rootNodes) {
+        traverse(root, null, true);
+      }
 
-    // Xuất ảnh cho các visual leaf
-    const imagesManifest = {};
-    const imagesData = [];
-    const totalImages = leafNodesForImages.length;
+      const imagesManifest = {};
+      const imagesData = [];
+      const totalImages = leafNodesForImages.length;
 
-    if (exportImages && totalImages > 0) {
-      figma.ui.postMessage({
-        type: 'status',
-        message: `Đang xuất ${totalImages} ảnh PNG...`,
-        current: 0,
-        total: totalImages,
-      });
+      let skipped1x1 = 0;
+      const failedIds = new Set();
 
-      // Helper: đọc width/height từ PNG Uint8Array (IHDR)
       function pngSize(bytes) {
         try {
           if (!bytes || bytes.length < 24) return null;
-          // PNG signature 8 bytes + IHDR length 4 + type 4 + width 4 + height 4
           const w = (bytes[16] << 24) | (bytes[17] << 16) | (bytes[18] << 8) | bytes[19];
           const h = (bytes[20] << 24) | (bytes[21] << 16) | (bytes[22] << 8) | bytes[23];
           if (w > 0 && h > 0 && w < 10000 && h < 10000) return { w, h };
@@ -290,109 +283,147 @@ figma.ui.onmessage = async (msg) => {
         } catch { return null; }
       }
 
-      let skipped1x1 = 0;
-      const failedIds = new Set();
-      for (let i = 0; i < totalImages; i++) {
-        const { node, imgKey, effVis } = leafNodesForImages[i];
-        const filename = `${imgKey}.png`;
-        // Nếu node nằm trong cây ẩn (effVis===false) → tạm bật các tổ tiên ẩn trước khi export
-        const hiddenAncestors = [];
-        if (effVis === false) {
-          try {
-            let cur = node.parent;
-            while (cur) {
-              if (cur.visible === false) hiddenAncestors.push(cur);
-              cur = cur.parent;
-            }
-            for (const anc of hiddenAncestors) anc.visible = true;
-          } catch {}
-        }
-        try {
-          const bytes = await node.exportAsync({
+      function exportWithTimeout(node, timeoutMs = 10000) {
+        return Promise.race([
+          node.exportAsync({
             format: 'PNG',
             constraint: { type: 'SCALE', value: 1 },
-          });
-          const sz = pngSize(bytes);
-          if (sz && sz.w === 1 && sz.h === 1) {
-            skipped1x1++;
-            failedIds.add(node.id);
-            console.warn(`[Pokiwar Exporter] Bỏ ảnh 1×1 ${node.id} (${node.name}) size node ${Math.round(node.width)}×${Math.round(node.height)} → PNG 1×1`);
-            // Không đưa vào manifest → nodes.json sẽ bị null imageRef ở bước sau
-            if (skipped1x1 <= 10) {
-              figma.ui.postMessage({ type: 'status', message: `Phát hiện ảnh 1×1: ${node.id} (${node.width}×${node.height})` });
+          }),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('timeout ' + timeoutMs + 'ms')), timeoutMs))
+        ]);
+      }
+
+      if (exportImages && totalImages > 0) {
+        figma.ui.postMessage({
+          type: 'status',
+          message: `Đang xuất ${totalImages} ảnh PNG...`,
+          current: 0,
+          total: totalImages,
+        });
+
+        for (let i = 0; i < totalImages; i++) {
+          const { node, imgKey, effVis } = leafNodesForImages[i];
+          const filename = `${imgKey}.png`;
+          const hiddenAncestors = [];
+          if (effVis === false) {
+            try {
+              let cur = node.parent;
+              while (cur) {
+                if (cur.visible === false) hiddenAncestors.push(cur);
+                cur = cur.parent;
+              }
+              for (const anc of hiddenAncestors) anc.visible = true;
+            } catch (e) {
+              console.warn('[Pokiwar Exporter] Lỗi khi bật hiddenAncestors', e);
             }
-          } else {
-            imagesManifest[imgKey] = filename;
-            imagesData.push({
-              name: filename,
-              bytes: bytes,
+          }
+          try {
+            const bytes = await exportWithTimeout(node, 10000);
+            const sz = pngSize(bytes);
+            if (sz && sz.w === 1 && sz.h === 1) {
+              skipped1x1++;
+              failedIds.add(node.id);
+              console.warn(`[Pokiwar Exporter] Bỏ ảnh 1×1 ${node.id} (${node.name}) size node ${Math.round(node.width)}×${Math.round(node.height)} → PNG 1×1`);
+              if (skipped1x1 <= 10) {
+                figma.ui.postMessage({ type: 'status', message: `Phát hiện ảnh 1×1: ${node.id} (${node.width}×${node.height})` });
+              }
+            } else {
+              imagesManifest[imgKey] = filename;
+              imagesData.push({
+                name: filename,
+                bytes: bytes,
+              });
+            }
+          } catch (err) {
+            console.warn(`[Pokiwar Exporter] Không thể xuất ảnh cho node ${node.id}:`, err);
+            try { figma.notify(`Bỏ qua ảnh lỗi ${node.id}: ${err.message || err}`, { timeout: 2000 }); } catch {}
+            failedIds.add(node.id);
+          } finally {
+            for (const anc of hiddenAncestors) {
+              try { anc.visible = false; } catch (e) { console.warn('[Pokiwar Exporter] Lỗi khôi phục visible', e); }
+            }
+          }
+
+          if ((i + 1) % 5 === 0 || i + 1 === totalImages) {
+            figma.ui.postMessage({
+              type: 'progress',
+              current: i + 1,
+              total: totalImages,
+              message: `Đang xuất ảnh (${i + 1}/${totalImages})...`,
             });
           }
-        } catch (err) {
-          console.warn(`[Pokiwar Exporter] Không thể xuất ảnh cho node ${node.id}:`, err);
-          failedIds.add(node.id);
-        } finally {
-          // Khôi phục visible cho tổ tiên
-          for (const anc of hiddenAncestors) {
-            try { anc.visible = false; } catch {}
+        }
+      }
+
+      if (skipped1x1 > 0 || failedIds.size > 0) {
+        for (const item of exportedNodes) {
+          const key = item.id.replace(/:/g, '_');
+          if (failedIds.has(item.id) || (item.imageRef && !imagesManifest[key])) {
+            item.imageRef = null;
           }
         }
+        console.warn(`[Pokiwar Exporter] Tổng bỏ ${skipped1x1} ảnh 1×1 / ${failedIds.size} lỗi/timeout`);
+      }
 
-        if ((i + 1) % 5 === 0 || i + 1 === totalImages) {
+      const designW = (rootBounds && rootBounds.width) ? rootBounds.width : 1440;
+      const designH = (rootBounds && rootBounds.height) ? rootBounds.height : 720;
+
+      const nodesDoc = {
+        designWidth: Math.round(designW),
+        designHeight: Math.round(designH),
+        nodeCount: exportedNodes.length,
+        nodes: exportedNodes,
+      };
+
+      const imagesDoc = {
+        count: Object.keys(imagesManifest).length,
+        images: imagesManifest,
+      };
+
+      const nodesJsonStr = JSON.stringify(nodesDoc);
+      const imagesJsonStr = JSON.stringify(imagesDoc);
+
+      const elapsedMs = Date.now() - startTime;
+
+      figma.ui.postMessage({
+        type: 'export-complete',
+        nodesJson: nodesJsonStr,
+        imagesJson: imagesJsonStr,
+        imagesData: imagesData,
+        stats: {
+          nodeCount: exportedNodes.length,
+          imageCount: Object.keys(imagesManifest).length,
+          nodesBytes: nodesJsonStr.length,
+          imagesBytes: imagesJsonStr.length,
+          elapsedMs,
+          skipped1x1,
+          failedCount: failedIds.size,
+        },
+      });
+    } catch (outerErr) {
+      console.error('[Pokiwar Exporter] Export lỗi ngoại lệ:', outerErr);
+      try { figma.notify('Export lỗi: ' + (outerErr.message || String(outerErr)), { error: true, timeout: 5000 }); } catch {}
+      figma.ui.postMessage({
+        type: 'error',
+        message: 'Export lỗi: ' + (outerErr.message || String(outerErr)) + ' — vui lòng thử lại hoặc bỏ chọn "Xuất kèm PNG".',
+      });
+      try {
+        if (exportedNodes.length > 0) {
+          const fallbackNodesDoc = {
+            designWidth: 1440,
+            designHeight: 720,
+            nodeCount: exportedNodes.length,
+            nodes: exportedNodes,
+          };
           figma.ui.postMessage({
-            type: 'progress',
-            current: i + 1,
-            total: totalImages,
-            message: `Đang xuất ảnh (${i + 1}/${totalImages})...`,
+            type: 'export-complete',
+            nodesJson: JSON.stringify(fallbackNodesDoc),
+            imagesJson: JSON.stringify({ count: 0, images: {} }),
+            imagesData: [],
+            stats: { nodeCount: exportedNodes.length, imageCount: 0, nodesBytes: 0, imagesBytes: 0, elapsedMs: Date.now() - startTime, error: String(outerErr) },
           });
         }
-      }
+      } catch {}
     }
-
-    // Null imageRef cho node bị 1×1 / lỗi export (đừng sinh file rỗng)
-    if (skipped1x1 > 0 || failedIds.size > 0) {
-      for (const item of exportedNodes) {
-        const key = item.id.replace(/:/g, '_');
-        if (failedIds.has(item.id) || (item.imageRef && !imagesManifest[key])) {
-          item.imageRef = null;
-        }
-      }
-      console.warn(`[Pokiwar Exporter] Tổng bỏ ${skipped1x1} ảnh 1×1 / ${failedIds.size} lỗi`);
-    }
-
-    const designW = rootBounds.width || 1440;
-    const designH = rootBounds.height || 720;
-
-    const nodesDoc = {
-      designWidth: Math.round(designW),
-      designHeight: Math.round(designH),
-      nodeCount: exportedNodes.length,
-      nodes: exportedNodes,
-    };
-
-    const imagesDoc = {
-      count: Object.keys(imagesManifest).length,
-      images: imagesManifest,
-    };
-
-    const nodesJsonStr = JSON.stringify(nodesDoc);
-    const imagesJsonStr = JSON.stringify(imagesDoc);
-
-    const elapsedMs = Date.now() - startTime;
-
-    // Gửi kết quả hoàn chỉnh về UI
-    figma.ui.postMessage({
-      type: 'export-complete',
-      nodesJson: nodesJsonStr,
-      imagesJson: imagesJsonStr,
-      imagesData: imagesData,
-      stats: {
-        nodeCount: exportedNodes.length,
-        imageCount: Object.keys(imagesManifest).length,
-        nodesBytes: nodesJsonStr.length,
-        imagesBytes: imagesJsonStr.length,
-        elapsedMs,
-      },
-    });
   }
 };
