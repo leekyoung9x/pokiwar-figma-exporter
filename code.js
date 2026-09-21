@@ -179,7 +179,8 @@ figma.ui.onmessage = async (msg) => {
     const leafNodesForImages = [];
 
     // Duyệt DFS pre-order bảo toàn z-order (con đầu vẽ trước, con cuối đè lên)
-    function traverse(node, parentId = null) {
+    // ancVis = effectiveVisible của tổ tiên (true = mọi tổ tiên đều visible)
+    function traverse(node, parentId = null, ancVis = true) {
       const box = node.absoluteBoundingBox;
       // Toạ độ tuyệt đối tính sẵn so với gốc màn hình
       const x = box ? Math.round((box.x - refX) * 100) / 100 : 0;
@@ -187,7 +188,9 @@ figma.ui.onmessage = async (msg) => {
       const width = box ? Math.round(box.width * 100) / 100 : Math.round((node.width || 0) * 100) / 100;
       const height = box ? Math.round(box.height * 100) / 100 : Math.round((node.height || 0) * 100) / 100;
 
-      const visible = node.visible !== false;
+      const ownVisible = node.visible !== false;
+      const effVis = ancVis && ownVisible;
+      const visible = ownVisible;
       const opacity = typeof node.opacity === 'number' ? node.opacity : 1;
       const cornerRadii = getCornerRadii(node);
       const fills = getFills(node);
@@ -224,7 +227,7 @@ figma.ui.onmessage = async (msg) => {
       const imgKey = isLeaf ? node.id.replace(/:/g, '_') : null;
 
       if (isLeaf && exportImages) {
-        leafNodesForImages.push({ node, imgKey });
+        leafNodesForImages.push({ node, imgKey, effVis, ancVis });
       }
 
       const item = {
@@ -253,13 +256,13 @@ figma.ui.onmessage = async (msg) => {
       // Đệ quy con theo thứ tự Figma (0 là dưới cùng, length-1 là trên cùng)
       if ('children' in node && Array.isArray(node.children)) {
         for (const child of node.children) {
-          traverse(child, node.id);
+          traverse(child, node.id, effVis);
         }
       }
     }
 
     for (const root of rootNodes) {
-      traverse(root, null);
+      traverse(root, null, true);
     }
 
     // Xuất ảnh cho các visual leaf
@@ -275,21 +278,64 @@ figma.ui.onmessage = async (msg) => {
         total: totalImages,
       });
 
+      // Helper: đọc width/height từ PNG Uint8Array (IHDR)
+      function pngSize(bytes) {
+        try {
+          if (!bytes || bytes.length < 24) return null;
+          // PNG signature 8 bytes + IHDR length 4 + type 4 + width 4 + height 4
+          const w = (bytes[16] << 24) | (bytes[17] << 16) | (bytes[18] << 8) | bytes[19];
+          const h = (bytes[20] << 24) | (bytes[21] << 16) | (bytes[22] << 8) | bytes[23];
+          if (w > 0 && h > 0 && w < 10000 && h < 10000) return { w, h };
+          return null;
+        } catch { return null; }
+      }
+
+      let skipped1x1 = 0;
+      const failedIds = new Set();
       for (let i = 0; i < totalImages; i++) {
-        const { node, imgKey } = leafNodesForImages[i];
+        const { node, imgKey, effVis } = leafNodesForImages[i];
         const filename = `${imgKey}.png`;
+        // Nếu node nằm trong cây ẩn (effVis===false) → tạm bật các tổ tiên ẩn trước khi export
+        const hiddenAncestors = [];
+        if (effVis === false) {
+          try {
+            let cur = node.parent;
+            while (cur) {
+              if (cur.visible === false) hiddenAncestors.push(cur);
+              cur = cur.parent;
+            }
+            for (const anc of hiddenAncestors) anc.visible = true;
+          } catch {}
+        }
         try {
           const bytes = await node.exportAsync({
             format: 'PNG',
             constraint: { type: 'SCALE', value: 1 },
           });
-          imagesManifest[imgKey] = filename;
-          imagesData.push({
-            name: filename,
-            bytes: bytes,
-          });
+          const sz = pngSize(bytes);
+          if (sz && sz.w === 1 && sz.h === 1) {
+            skipped1x1++;
+            failedIds.add(node.id);
+            console.warn(`[Pokiwar Exporter] Bỏ ảnh 1×1 ${node.id} (${node.name}) size node ${Math.round(node.width)}×${Math.round(node.height)} → PNG 1×1`);
+            // Không đưa vào manifest → nodes.json sẽ bị null imageRef ở bước sau
+            if (skipped1x1 <= 10) {
+              figma.ui.postMessage({ type: 'status', message: `Phát hiện ảnh 1×1: ${node.id} (${node.width}×${node.height})` });
+            }
+          } else {
+            imagesManifest[imgKey] = filename;
+            imagesData.push({
+              name: filename,
+              bytes: bytes,
+            });
+          }
         } catch (err) {
           console.warn(`[Pokiwar Exporter] Không thể xuất ảnh cho node ${node.id}:`, err);
+          failedIds.add(node.id);
+        } finally {
+          // Khôi phục visible cho tổ tiên
+          for (const anc of hiddenAncestors) {
+            try { anc.visible = false; } catch {}
+          }
         }
 
         if ((i + 1) % 5 === 0 || i + 1 === totalImages) {
@@ -301,6 +347,17 @@ figma.ui.onmessage = async (msg) => {
           });
         }
       }
+    }
+
+    // Null imageRef cho node bị 1×1 / lỗi export (đừng sinh file rỗng)
+    if (skipped1x1 > 0 || failedIds.size > 0) {
+      for (const item of exportedNodes) {
+        const key = item.id.replace(/:/g, '_');
+        if (failedIds.has(item.id) || (item.imageRef && !imagesManifest[key])) {
+          item.imageRef = null;
+        }
+      }
+      console.warn(`[Pokiwar Exporter] Tổng bỏ ${skipped1x1} ảnh 1×1 / ${failedIds.size} lỗi`);
     }
 
     const designW = rootBounds.width || 1440;

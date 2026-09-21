@@ -6,6 +6,11 @@
  */
 
 import fs from 'fs';
+import { createRequire } from 'module';
+const require = createRequire(import.meta.url);
+let PNG;
+try { PNG = require('pngjs').PNG; } catch { try { PNG = require('/Downloads/poki/pokiwar-web/node_modules/pngjs').PNG; } catch { PNG=null; } }
+import path from 'path';
 import { performance } from 'perf_hooks';
 import {
   convertRawLayersToTargetSchema,
@@ -236,6 +241,28 @@ for (const m of mixedVerifications) {
 }
 console.log('-'.repeat(80));
 console.log();
+
+// ── 7. KIỂM PNG 1×1 (chặn ảnh rỗng) ──────────────────────────────────────────
+let pngBad = [];
+try {
+  const poc2NodesPath = '/Downloads/poki/pokiwar-web/public/game/poc2/nodes.json';
+  const poc2ImagesDir = '/Downloads/poki/pokiwar-web/public/game/poc2/images';
+  if (PNG && fs.existsSync(poc2NodesPath) && fs.existsSync(poc2ImagesDir)) {
+    const j2 = JSON.parse(fs.readFileSync(poc2NodesPath,'utf8'));
+    for(const n of (j2.nodes||[])){
+      if(!n.imageRef) continue;
+      const file=path.join(poc2ImagesDir, `${n.imageRef}.png`);
+      if(!fs.existsSync(file)) { pngBad.push(`${n.id} MISSING`); continue; }
+      const data=fs.readFileSync(file);
+      try{ const png=PNG.sync.read(data); if(png.width<=1||png.height<=1) pngBad.push(`${n.id} ${n.name} ${n.width}×${n.height} → PNG ${png.width}×${png.height}`);}catch(e){pngBad.push(`${n.id} ERR`);}
+    }
+  }
+} catch(e){ console.warn('bench PNG check error', e.message); }
+console.log('7. KIỂM PNG 1×1: ' + (pngBad.length===0 ? 'PASS (mọi PNG >1×1) ✅' : `FAIL ${pngBad.length} ảnh 1×1 ❌`));
+if(pngBad.length>0){
+  for(const b of pngBad.slice(0,10)) console.log('  - '+b);
+  if(pngBad.length>10) console.log(`  ... và ${pngBad.length-10} file nữa`);
+}
 
 // Xuất file demo schema đích để tham khảo
 const sampleNode = targetResult.nodes.find((n) => n.id === '639:127');

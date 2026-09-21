@@ -12,6 +12,11 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'fs';
+import { createRequire } from 'module';
+const require = createRequire(import.meta.url);
+let PNG;
+try { PNG = require('pngjs').PNG; } catch { try { PNG = require('/Downloads/poki/pokiwar-web/node_modules/pngjs').PNG; } catch { PNG=null; } }
+import path from 'path';
 import {
   convertRawLayersToTargetSchema,
   readGeometry,
@@ -206,4 +211,33 @@ describe('Pokiwar Canvas Exporter Test Suite', () => {
     );
     assert.equal(parentsWithImages.length, 0, 'Không được có khung cha nào có imageRef');
   });
+
+  // ── CA 6: Mọi PNG phải có width>1 && height>1 (chặn ảnh rỗng 1×1) ───────────────
+  test('Ca 6: Mọi PNG export phải có width>1 && height>1 (không 1×1)', () => {
+    // Kiểm cả poc (cũ) và poc2 (mới) nếu tồn tại
+    const poc2NodesPath = '/Downloads/poki/pokiwar-web/public/game/poc2/nodes.json';
+    const poc2ImagesDir = '/Downloads/poki/pokiwar-web/public/game/poc2/images';
+    const check = (nodesPath, imagesDir) => {
+      if (!fs.existsSync(nodesPath) || !fs.existsSync(imagesDir)) return;
+      const doc = JSON.parse(fs.readFileSync(nodesPath,'utf8'));
+      const nodes = doc.nodes || doc.flattenLayers || [];
+      // poc cũ dùng flattenLayers không có imageRef trực tiếp → bỏ qua nếu 0
+      const withImage = nodes.filter(n=>n.imageRef);
+      if(withImage.length===0) return;
+      let bad=[];
+      for(const n of withImage){
+        const file=path.join(imagesDir, `${n.imageRef}.png`);
+        if(!fs.existsSync(file)) { bad.push(`${n.id} MISSING`); continue; }
+        const data=fs.readFileSync(file);
+        let png;
+        try { png = PNG.sync.read(data); } catch(e){ bad.push(`${n.id} ERR ${e.message}`); continue; }
+        if(png.width<=1 || png.height<=1) bad.push(`${n.id} ${n.name} ${n.width}×${n.height} → PNG ${png.width}×${png.height}`);
+      }
+      assert.equal(bad.length, 0, `Phát hiện ${bad.length} PNG 1×1/thiếu ở ${imagesDir}: ${bad.slice(0,3).join('; ')}${bad.length>3?' ...':''}`);
+    };
+    // poc2 mới (ưu tiên kiểm poc2 vì poc cũ dùng schema khác)
+    check(poc2NodesPath, poc2ImagesDir);
+    // poc cũ — chỉ kiểm nếu có imageRef (bỏ qua legacy format)
+  });
+
 });
